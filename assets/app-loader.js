@@ -1,4 +1,4 @@
-const response = await fetch("/assets/app.js?v=5");
+const response = await fetch("/assets/app.js?v=6");
 if (!response.ok) throw new Error(`App bundle failed to load: ${response.status}`);
 
 const source = await response.text();

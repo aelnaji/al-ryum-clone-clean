@@ -33859,70 +33859,48 @@ void main() {
     ] });
   }
 
-  // client/src/hooks/useInertialSectionProgress.ts
+  // client/src/hooks/useAutoTour.ts
   var import_react2 = __toESM(require_react(), 1);
-  var clamp2 = (value) => Math.max(0, Math.min(0.999, value));
-  // The globe tour runs while the globe stage is pinned: from the section's top until the
-  // partnership layer (which slides over the globe) reaches the bottom of the screen.
-  var tourTravel = (section) => {
-    const layer = section.querySelector(".partnership-layer");
-    const span = layer ? layer.getBoundingClientRect().top - section.getBoundingClientRect().top : section.offsetHeight;
-    return Math.max(1, span - window.innerHeight);
-  };
-  var damp = (current, target, smoothing, delta) => current + (target - current) * (1 - Math.exp(-smoothing * delta));
-  function useInertialSectionProgress(sectionRef) {
-    const [progress, setProgress] = (0, import_react2.useState)(0);
+  // The globe section no longer pins and scrubs with the scroll: while it is on screen the
+  // tour plays by itself, holding on each city and then gliding the globe to the next, and
+  // loops. It pauses off screen and in a hidden tab. A city can be picked from the list.
+  // focus runs 0..1 across the cities; city i sits at the middle of its band, (i + .5) / n.
+  var TOUR_HOLD = 3500, TOUR_GLIDE = 1100;
+  function useAutoTour(sectionRef, count) {
+    const [state, setState] = (0, import_react2.useState)({ index: 0, focus: 0.5 / count });
+    const pickRef = (0, import_react2.useRef)(null);
     (0, import_react2.useEffect)(() => {
-      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        const updateImmediately = () => {
-          const section = sectionRef.current;
-          if (!section) return;
-          const travel = tourTravel(section);
-          setProgress(clamp2(-section.getBoundingClientRect().top / travel));
-        };
-        updateImmediately();
-        window.addEventListener("scroll", updateImmediately, { passive: true });
-        window.addEventListener("resize", updateImmediately);
-        return () => {
-          window.removeEventListener("scroll", updateImmediately);
-          window.removeEventListener("resize", updateImmediately);
-        };
-      }
-      let target = 0;
-      let current = 0;
-      let rendered = 0;
-      let previousTime = performance.now();
-      let frame = 0;
-      const sampleScroll = () => {
-        const section = sectionRef.current;
-        if (!section) return;
-        const travel = tourTravel(section);
-        target = clamp2(-section.getBoundingClientRect().top / travel);
-      };
-      const tick = (time) => {
-        const delta = Math.min(0.05, Math.max(1e-3, (time - previousTime) / 1e3));
-        previousTime = time;
-        current = damp(current, target, 6.4, delta);
-        if (Math.abs(current - rendered) > 7e-4) {
-          rendered = current;
-          setProgress(current);
+      const section = sectionRef.current;
+      if (!section) return;
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const at = (i) => (i + 0.5) / count;
+      let index = 0, from = at(0), to = at(0), phaseStart = performance.now(), gliding = false;
+      let visible = false, frame = 0, last = -1;
+      const show = (focus) => { if (Math.abs(focus - last) > 4e-4) { last = focus; setState({ index, focus }); } };
+      const goTo = (i, now) => { from = gliding ? from + (to - from) * Math.min(1, (now - phaseStart) / TOUR_GLIDE) : at(index); index = i; to = at(i); phaseStart = now; gliding = !reduce; if (reduce) show(to); };
+      pickRef.current = (i) => { if (i !== index) goTo(i, performance.now()); else phaseStart = performance.now(); wake(); };
+      const tick = (now) => {
+        frame = 0;
+        if (!visible || document.hidden) return;
+        const t = now - phaseStart;
+        if (gliding) {
+          const k = Math.min(1, t / TOUR_GLIDE), e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+          show(from + (to - from) * e);
+          if (k >= 1) { gliding = false; phaseStart = now; }
+        } else {
+          show(to);
+          if (t >= TOUR_HOLD) goTo((index + 1) % count, now);
         }
-        frame = window.requestAnimationFrame(tick);
+        frame = requestAnimationFrame(tick);
       };
-      sampleScroll();
-      current = target;
-      rendered = target;
-      setProgress(target);
-      frame = window.requestAnimationFrame(tick);
-      window.addEventListener("scroll", sampleScroll, { passive: true });
-      window.addEventListener("resize", sampleScroll);
-      return () => {
-        window.cancelAnimationFrame(frame);
-        window.removeEventListener("scroll", sampleScroll);
-        window.removeEventListener("resize", sampleScroll);
-      };
-    }, [sectionRef]);
-    return progress;
+      // coming back on screen restarts the current hold rather than jumping ahead
+      function wake() { if (!frame && visible && !document.hidden) { if (!gliding) phaseStart = performance.now(); frame = requestAnimationFrame(tick); } }
+      const io = new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; wake(); }, { threshold: 0.25 });
+      io.observe(section);
+      document.addEventListener("visibilitychange", wake);
+      return () => { io.disconnect(); document.removeEventListener("visibilitychange", wake); if (frame) cancelAnimationFrame(frame); pickRef.current = null; };
+    }, [sectionRef, count]);
+    return [state, (i) => pickRef.current && pickRef.current(i)];
   }
 
   // client/src/HomeSection.tsx
@@ -33944,8 +33922,8 @@ void main() {
   ];
   function HomeSection() {
     const sectionRef = (0, import_react3.useRef)(null);
-    const progress = useInertialSectionProgress(sectionRef);
-    const activeIndex = Math.min(cities2.length - 1, Math.floor(progress * cities2.length));
+    const [tour, pickCity] = useAutoTour(sectionRef, cities2.length);
+    const progress = tour.focus, activeIndex = tour.index;
     return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "global-page", children: [
       /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("section", { className: "intro-panel", "aria-label": "Global Reach introduction", children: [
         /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "intro-grid" }),
@@ -33966,7 +33944,7 @@ void main() {
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("h2", { id: "globe-title", children: "One coordinated network." }),
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { children: "A regional operating model connecting five strategic locations through trusted partners, local teams, and project intelligence." })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "city-index", "aria-label": "GCC city markers", children: cities2.map((city, index) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: index === activeIndex ? "city-line is-active" : "city-line", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "city-index", "aria-label": "GCC city markers", children: cities2.map((city, index) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("button", { type: "button", onClick: () => pickCity(index), "aria-pressed": index === activeIndex, className: index === activeIndex ? "city-line is-active" : "city-line", children: [
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("b", { children: city.number }),
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: city.city }),
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("em", { children: city.country })
@@ -33985,7 +33963,7 @@ void main() {
             ] })
           ] }),
           /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("p", { className: "scroll-cue", children: [
-            "SCROLL TO TRACE ",
+            "TRACING ",
             /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { children: [
               String(activeIndex + 1).padStart(2, "0"),
               "/" + String(cities2.length).padStart(2, "0")

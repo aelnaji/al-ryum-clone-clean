@@ -41,8 +41,6 @@
   /* "Operating across the GCC." ran past the right edge; let it wrap */
   .intro-panel h1, .intro-title { white-space: normal !important; max-width: 100% !important; }
 
-  /* the globe holds while it tours the cities; a shorter hold on phones */
-  .partnership-layer { margin-top: 120svh; }
 
   /* Projects showcase: each group is one swipeable row of shorter cards */
   .ar-showcase__grid {
